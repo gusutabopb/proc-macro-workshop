@@ -10,13 +10,20 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
     let mut field_def = vec![];
     let mut field_init = vec![];
+    let mut field_setters = vec![];
     if let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data {
         for field in fields.iter() {
-            dbg!(&field);
+            // dbg!(&field);
             // Any field attributes are dropped
             let Field { vis, ty, ident, .. } = field;
             field_def.push(quote!(#vis #ident: Option<#ty>));
             field_init.push(quote!(#ident: None));
+            field_setters.push(quote!(
+                fn #ident(&mut self, #ident: #ty) -> &mut Self {
+                    self.#ident = Some(#ident);
+                    self
+                }
+            ));
         }
     }
 
@@ -31,6 +38,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
                     #(#field_init),*
                 }
             }
+        }
+
+        impl #struct_builder {
+            #(#field_setters)*
         }
     )
     .into()
