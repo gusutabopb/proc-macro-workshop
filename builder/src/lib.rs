@@ -3,23 +3,37 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::{Field, Type};
 
-fn is_option(ty: &Type) -> bool {
-    use syn::{Path, PathSegment, TypePath};
-    match ty {
-        Type::Path(TypePath {
-            qself: None,
-            path: Path { segments, .. },
-        }) => match segments.first() {
-            Some(PathSegment { ident, .. }) => ident == "Option",
-            _ => false,
-        },
-        _ => false,
+#[derive(Debug)]
+enum FieldType {
+    Raw,
+    Option(Type),
+    Vec(Type),
+}
+
+fn field_type(ty: &Type) -> FieldType {
+    use syn::{
+        AngleBracketedGenericArguments as ABG, GenericArgument, Path,
+        PathArguments::AngleBracketed, PathSegment, TypePath,
+    };
+    let Type::Path(TypePath { qself: None, path: Path { segments, .. } }) = ty else {
+        return FieldType::Raw;
+    };
+    let Some(PathSegment { ident, arguments: AngleBracketed(ABG { args, .. }) }) = segments.first() else {
+        return FieldType::Raw;
+    };
+    let Some(GenericArgument::Type(t)) = args.first() else {
+        return FieldType::Raw;
+    };
+    match ident.to_string().as_str() {
+        "Option" => FieldType::Option(t.clone()),
+        "Vec" => FieldType::Vec(t.clone()),
+        _ => FieldType::Raw,
     }
 }
 
 type BuildTokens = (TokenStream2, TokenStream2, TokenStream2, TokenStream2);
 
-fn regular_field(field: &Field) -> BuildTokens {
+fn raw_field(field: &Field) -> BuildTokens {
     let Field { vis, ty, ident, .. } = field;
     (
         quote!(#vis #ident: Option<#ty>),
@@ -38,8 +52,8 @@ fn regular_field(field: &Field) -> BuildTokens {
     )
 }
 
-fn optional_field(field: &Field) -> BuildTokens {
-    let Field { vis, ty, ident, .. } = field;
+fn optional_field(field: &Field, ty: Type) -> BuildTokens {
+    let Field { vis, ident, .. } = field;
     (
         quote!(#vis #ident: Option<#ty>),
         quote!(#ident: None),
@@ -49,7 +63,7 @@ fn optional_field(field: &Field) -> BuildTokens {
                 self
             }
         ),
-        quote!(#ident: self.#ident.take().unwrap_or_default()),
+        quote!(#ident: self.#ident.take()),
     )
 }
 
@@ -67,9 +81,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
         for field in fields.iter() {
             // dbg!(&field);
             // Any field attributes are dropped
-            let (def, init, set, validate) = match is_option(&field.ty) {
-                true => optional_field(field),
-                false => regular_field(field),
+            let (def, init, set, validate) = match field_type(&field.ty) {
+                FieldType::Option(ty) => optional_field(field, ty),
+                FieldType::Vec(_) => raw_field(field),
+                FieldType::Raw => raw_field(field),
             };
             defs.push(def);
             inits.push(init);
