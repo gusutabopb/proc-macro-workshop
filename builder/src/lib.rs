@@ -26,7 +26,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 }
             ));
             builder_fields.push(quote!(
-                #ident: self.#ident.ok_or("Field missing")?
+                #ident: self.#ident.ok_or(
+                    format!("Field missing: '{}'", stringify!(#ident))
+                )?
             ));
         }
     }
