@@ -26,7 +26,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 }
             ));
             builder_fields.push(quote!(
-                #ident: self.#ident.ok_or(
+                #ident: self.#ident.take().ok_or(
                     format!("Field missing: '{}'", stringify!(#ident))
                 )?
             ));
@@ -49,7 +49,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         impl #struct_builder {
             #(#field_setters)*
 
-            pub fn build(self) -> Result<#struct_name, Box<dyn std::error::Error>> {
+            pub fn build(&mut self) -> Result<#struct_name, Box<dyn std::error::Error>> {
                 Ok(#struct_name {
                     #(#builder_fields),*
                 })
