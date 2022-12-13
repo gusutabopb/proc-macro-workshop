@@ -56,8 +56,8 @@ fn optional_field(field: &Field) -> BuildTokens {
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input: syn::DeriveInput = syn::parse(input).unwrap();
-    let struct_name = &input.ident;
-    let struct_builder = format_ident!("{}Builder", struct_name);
+    let name = &input.ident;
+    let builder = format_ident!("{}Builder", name);
 
     let mut defs = vec![];
     let mut inits = vec![];
@@ -79,23 +79,23 @@ pub fn derive(input: TokenStream) -> TokenStream {
     }
 
     quote!(
-        pub struct #struct_builder {
+        pub struct #builder {
             #(#defs),*
         }
 
-        impl #struct_name {
-            pub fn builder() -> #struct_builder {
-                #struct_builder {
+        impl #name {
+            pub fn builder() -> #builder {
+                #builder {
                     #(#inits),*
                 }
             }
         }
 
-        impl #struct_builder {
+        impl #builder {
             #(#setters)*
 
-            pub fn build(&mut self) -> Result<#struct_name, Box<dyn std::error::Error>> {
-                Ok(#struct_name {
+            pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
+                Ok(#name {
                     #(#validators),*
                 })
             }
