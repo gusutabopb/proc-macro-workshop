@@ -11,6 +11,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
     let mut field_def = vec![];
     let mut field_init = vec![];
     let mut field_setters = vec![];
+    let mut builder_fields = vec![];
     if let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data {
         for field in fields.iter() {
             // dbg!(&field);
@@ -23,6 +24,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
                     self.#ident = Some(#ident);
                     self
                 }
+            ));
+            builder_fields.push(quote!(
+                #ident: self.#ident.ok_or("Field missing")?
             ));
         }
     }
@@ -42,6 +46,12 @@ pub fn derive(input: TokenStream) -> TokenStream {
 
         impl #struct_builder {
             #(#field_setters)*
+
+            pub fn build(self) -> Result<#struct_name, Box<dyn std::error::Error>> {
+                Ok(#struct_name {
+                    #(#builder_fields),*
+                })
+            }
         }
     )
     .into()
