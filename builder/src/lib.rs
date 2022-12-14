@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
+use syn::spanned::Spanned;
 use syn::{Attribute, Field, PathSegment, Type};
 
 #[derive(Debug)]
@@ -33,39 +34,46 @@ fn field_type(ty: &Type) -> FieldType {
     }
 }
 
-fn build_attribute(attr: &Attribute) -> Option<String> {
+fn build_attribute(attr: &Attribute) -> Result<String, syn::Error> {
     use syn::{Lit, Meta::List, Meta::NameValue, MetaList, MetaNameValue, NestedMeta};
-    let Ok(List(MetaList { path, nested, ..})) = attr.parse_meta() else {
-        return None
+    let meta = attr.parse_meta()?;
+    let err = Err(syn::Error::new(meta.span(), "failed to parse attribute"));
+    let List(MetaList { path, nested, ..}) = &meta else {
+        return err;
     };
     let Some( PathSegment { ident, .. } ) = path.segments.first() else {
-        return None
+        return err;
     };
     if ident != "builder" {
-        return None;
+        return err;
     }
     let Some(
         NestedMeta::Meta(NameValue(MetaNameValue { path, lit, .. } ) )
     ) = nested.first() else {
-        return None
+        return err;
     };
     let Some( PathSegment { ident, .. } ) = path.segments.first() else {
-        return None
+        return err;
     };
     if ident != "each" {
-        return None;
+        // ident.span() gives a better error span, but "fails" test
+        return Err(syn::Error::new(
+            meta.span(),
+            "expected `builder(each = \"...\")`",
+        ));
     }
     let Lit::Str(s) = lit else {
-        return None
+        return err;
     };
-    Some(s.value())
+    Ok(s.value())
 }
 
 type BuildTokens = (TokenStream2, TokenStream2, TokenStream2, TokenStream2);
+type FieldParseResult = Result<BuildTokens, syn::Error>;
 
-fn raw_field(field: &Field) -> BuildTokens {
+fn raw_field(field: &Field) -> FieldParseResult {
     let Field { vis, ty, ident, .. } = field;
-    (
+    Ok((
         quote!(#vis #ident: Option<#ty>),
         quote!(#ident: None),
         quote!(
@@ -79,10 +87,10 @@ fn raw_field(field: &Field) -> BuildTokens {
                 format!("Field missing: '{}'", stringify!(#ident))
             )?
         ),
-    )
+    ))
 }
 
-fn repeated_field(field: &Field, ty: Type) -> BuildTokens {
+fn repeated_field(field: &Field, ty: Type) -> FieldParseResult {
     let Field {
         attrs, vis, ident, ..
     } = field;
@@ -90,12 +98,7 @@ fn repeated_field(field: &Field, ty: Type) -> BuildTokens {
         // No attributes - return raw
         return raw_field(field)
     };
-    let Some(each) = build_attribute(attr) else {
-        // Error parsing build attribute - return raw
-        return raw_field(field)
-    };
-
-    let each = format_ident!("{}", each);
+    let each = format_ident!("{}", build_attribute(attr)?);
 
     let all_in_one_builder = if each == ident.clone().unwrap() {
         quote!()
@@ -108,7 +111,7 @@ fn repeated_field(field: &Field, ty: Type) -> BuildTokens {
         )
     };
 
-    (
+    Ok((
         quote!(#vis #ident: Vec<#ty>),
         quote!(#ident: Vec::new()),
         quote!(
@@ -120,12 +123,12 @@ fn repeated_field(field: &Field, ty: Type) -> BuildTokens {
             #all_in_one_builder
         ),
         quote!(#ident: self.#ident.to_owned()),
-    )
+    ))
 }
 
-fn optional_field(field: &Field, ty: Type) -> BuildTokens {
+fn optional_field(field: &Field, ty: Type) -> FieldParseResult {
     let Field { vis, ident, .. } = field;
-    (
+    Ok((
         quote!(#vis #ident: Option<#ty>),
         quote!(#ident: None),
         quote!(
@@ -135,12 +138,20 @@ fn optional_field(field: &Field, ty: Type) -> BuildTokens {
             }
         ),
         quote!(#ident: self.#ident.take()),
-    )
+    ))
 }
 
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
-    let input: syn::DeriveInput = syn::parse(input).unwrap();
+    match derive_impl(input) {
+        Ok(t) => t,
+        Err(err) => err.to_compile_error(),
+    }
+    .into()
+}
+
+fn derive_impl(input: TokenStream) -> Result<TokenStream2, syn::Error> {
+    let input: syn::DeriveInput = syn::parse(input)?;
     let name = &input.ident;
     let builder = format_ident!("{}Builder", name);
 
@@ -151,11 +162,10 @@ pub fn derive(input: TokenStream) -> TokenStream {
     if let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data {
         for field in fields.iter() {
             // dbg!(&field);
-            // Any field attributes are dropped
             let (def, init, set, validate) = match field_type(&field.ty) {
-                FieldType::Option(ty) => optional_field(field, ty),
-                FieldType::Repeated(ty) => repeated_field(field, ty),
-                FieldType::Raw => raw_field(field),
+                FieldType::Option(ty) => optional_field(field, ty)?,
+                FieldType::Repeated(ty) => repeated_field(field, ty)?,
+                FieldType::Raw => raw_field(field)?,
             };
             defs.push(def);
             inits.push(init);
@@ -164,7 +174,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
         }
     }
 
-    quote!(
+    Ok(quote!(
         pub struct #builder {
             #(#defs),*
         }
@@ -186,6 +196,5 @@ pub fn derive(input: TokenStream) -> TokenStream {
                 })
             }
         }
-    )
-    .into()
+    ))
 }
