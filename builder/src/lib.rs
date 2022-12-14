@@ -74,7 +74,7 @@ type FieldParseResult = Result<BuildTokens, syn::Error>;
 fn raw_field(field: &Field) -> FieldParseResult {
     let Field { vis, ty, ident, .. } = field;
     Ok((
-        quote!(#vis #ident: Option<#ty>),
+        quote!(#vis #ident: std::option::Option<#ty>),
         quote!(#ident: None),
         quote!(
             fn #ident(&mut self, #ident: #ty) -> &mut Self {
@@ -129,7 +129,7 @@ fn repeated_field(field: &Field, ty: Type) -> FieldParseResult {
 fn optional_field(field: &Field, ty: Type) -> FieldParseResult {
     let Field { vis, ident, .. } = field;
     Ok((
-        quote!(#vis #ident: Option<#ty>),
+        quote!(#vis #ident: std::option::Option<#ty>),
         quote!(#ident: None),
         quote!(
             fn #ident(&mut self, #ident: #ty) -> &mut Self {
@@ -190,7 +190,7 @@ fn derive_impl(input: TokenStream) -> Result<TokenStream2, syn::Error> {
         impl #builder {
             #(#setters)*
 
-            pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
+            pub fn build(&mut self) -> std::result::Result<#name, std::boxed::Box<dyn std::error::Error>> {
                 Ok(#name {
                     #(#validators),*
                 })
