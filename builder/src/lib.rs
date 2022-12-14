@@ -33,6 +33,34 @@ fn field_type(ty: &Type) -> FieldType {
     }
 }
 
+fn build_attribute(attr: &Attribute) -> Option<String> {
+    use syn::{Lit, Meta::List, Meta::NameValue, MetaList, MetaNameValue, NestedMeta};
+    let Ok(List(MetaList { path, nested, ..})) = attr.parse_meta() else {
+        return None
+    };
+    let Some( PathSegment { ident, .. } ) = path.segments.first() else {
+        return None
+    };
+    if ident != "builder" {
+        return None;
+    }
+    let Some(
+        NestedMeta::Meta(NameValue(MetaNameValue { path, lit, .. } ) )
+    ) = nested.first() else {
+        return None
+    };
+    let Some( PathSegment { ident, .. } ) = path.segments.first() else {
+        return None
+    };
+    if ident != "each" {
+        return None;
+    }
+    let Lit::Str(s) = lit else {
+        return None
+    };
+    Some(s.value())
+}
+
 type BuildTokens = (TokenStream2, TokenStream2, TokenStream2, TokenStream2);
 
 fn raw_field(field: &Field) -> BuildTokens {
@@ -54,6 +82,47 @@ fn raw_field(field: &Field) -> BuildTokens {
     )
 }
 
+fn repeated_field(field: &Field, ty: Type) -> BuildTokens {
+    let Field {
+        attrs, vis, ident, ..
+    } = field;
+    let Some(attr) = attrs.first() else {
+        // No attributes - return raw
+        return raw_field(field)
+    };
+    let Some(each) = build_attribute(attr) else {
+        // Error parsing build attribute - return raw
+        return raw_field(field)
+    };
+
+    let each = format_ident!("{}", each);
+
+    let all_in_one_builder = if each == ident.clone().unwrap() {
+        quote!()
+    } else {
+        quote!(
+            fn #ident(&mut self, #ident: Vec<#ty>) -> &mut Self {
+                self.#ident.extend(#ident);
+                self
+            }
+        )
+    };
+
+    (
+        quote!(#vis #ident: Vec<#ty>),
+        quote!(#ident: Vec::new()),
+        quote!(
+            fn #each(&mut self, #each: #ty) -> &mut Self {
+                self.#ident.push(#each);
+                self
+            }
+
+            #all_in_one_builder
+        ),
+        quote!(#ident: self.#ident.to_owned()),
+    )
+}
+
 fn optional_field(field: &Field, ty: Type) -> BuildTokens {
     let Field { vis, ident, .. } = field;
     (
@@ -69,7 +138,7 @@ fn optional_field(field: &Field, ty: Type) -> BuildTokens {
     )
 }
 
-#[proc_macro_derive(Builder)]
+#[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: TokenStream) -> TokenStream {
     let input: syn::DeriveInput = syn::parse(input).unwrap();
     let name = &input.ident;
@@ -85,7 +154,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
             // Any field attributes are dropped
             let (def, init, set, validate) = match field_type(&field.ty) {
                 FieldType::Option(ty) => optional_field(field, ty),
-                FieldType::Repeated(_) => raw_field(field),
+                FieldType::Repeated(ty) => repeated_field(field, ty),
                 FieldType::Raw => raw_field(field),
             };
             defs.push(def);
