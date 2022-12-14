@@ -1,24 +1,26 @@
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
-use syn::{Field, Type};
+use syn::{Attribute, Field, PathSegment, Type};
 
 #[derive(Debug)]
 enum FieldType {
     Raw,
     Option(Type),
-    Vec(Type),
+    Repeated(Type),
 }
 
 fn field_type(ty: &Type) -> FieldType {
     use syn::{
-        AngleBracketedGenericArguments as ABG, GenericArgument, Path,
-        PathArguments::AngleBracketed, PathSegment, TypePath,
+        AngleBracketedGenericArguments as ABGA, GenericArgument, Path,
+        PathArguments::AngleBracketed, TypePath,
     };
     let Type::Path(TypePath { qself: None, path: Path { segments, .. } }) = ty else {
         return FieldType::Raw;
     };
-    let Some(PathSegment { ident, arguments: AngleBracketed(ABG { args, .. }) }) = segments.first() else {
+    let Some(
+        PathSegment { ident, arguments: AngleBracketed( ABGA { args, .. } ) }
+    ) = segments.first() else {
         return FieldType::Raw;
     };
     let Some(GenericArgument::Type(t)) = args.first() else {
@@ -26,7 +28,7 @@ fn field_type(ty: &Type) -> FieldType {
     };
     match ident.to_string().as_str() {
         "Option" => FieldType::Option(t.clone()),
-        "Vec" => FieldType::Vec(t.clone()),
+        "Vec" => FieldType::Repeated(t.clone()),
         _ => FieldType::Raw,
     }
 }
@@ -83,7 +85,7 @@ pub fn derive(input: TokenStream) -> TokenStream {
             // Any field attributes are dropped
             let (def, init, set, validate) = match field_type(&field.ty) {
                 FieldType::Option(ty) => optional_field(field, ty),
-                FieldType::Vec(_) => raw_field(field),
+                FieldType::Repeated(_) => raw_field(field),
                 FieldType::Raw => raw_field(field),
             };
             defs.push(def);
