@@ -57,6 +57,8 @@ fn build_attribute(attr: &Attribute) -> Result<String, syn::Error> {
     };
     if ident != "each" {
         // ident.span() gives a better error span, but "fails" test
+        // Span contents may change depending on toolchain.
+        // This passes errors when using 1.68.0-nightly-2022-12-12, but fails with 1.66.0-stable
         return Err(syn::Error::new(
             meta.span(),
             "expected `builder(each = \"...\")`",
