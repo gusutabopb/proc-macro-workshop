@@ -2,7 +2,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::spanned::Spanned;
-use syn::{Attribute, Field, PathSegment, Type};
+use syn::{Attribute, Data, DataStruct, Field, Fields, FieldsNamed, PathSegment, Type};
 
 #[derive(Debug)]
 enum FieldType {
@@ -161,19 +161,22 @@ fn derive_impl(input: TokenStream) -> Result<TokenStream2, syn::Error> {
     let mut inits = vec![];
     let mut setters = vec![];
     let mut validators = vec![];
-    if let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data {
-        for field in fields.iter() {
-            // dbg!(&field);
-            let (def, init, set, validate) = match field_type(&field.ty) {
-                FieldType::Option(ty) => optional_field(field, ty)?,
-                FieldType::Repeated(ty) => repeated_field(field, ty)?,
-                FieldType::Raw => raw_field(field)?,
-            };
-            defs.push(def);
-            inits.push(init);
-            setters.push(set);
-            validators.push(validate);
-        }
+    let Data::Struct(
+        DataStruct { fields: Fields::Named(FieldsNamed { named: fields, .. } ), .. }
+    ) = input.data else {
+        return Err(syn::Error::new(input.span(), "expected struct with fields"));
+    };
+    for field in fields.iter() {
+        // dbg!(&field);
+        let (def, init, set, validate) = match field_type(&field.ty) {
+            FieldType::Option(ty) => optional_field(field, ty)?,
+            FieldType::Repeated(ty) => repeated_field(field, ty)?,
+            FieldType::Raw => raw_field(field)?,
+        };
+        defs.push(def);
+        inits.push(init);
+        setters.push(set);
+        validators.push(validate);
     }
 
     Ok(quote!(
