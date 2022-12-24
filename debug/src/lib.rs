@@ -36,8 +36,11 @@ fn derive_impl(input: TokenStream) -> Result<TokenStream2, syn::Error> {
         })
         .collect::<Result<Vec<_>, syn::Error>>()?;
 
+    let (impl_generics, ty_generics, _) = input.generics.split_for_impl();
+    let where_clause = generate_where_clause(&input.generics);
+
     Ok(quote!(
-        impl ::std::fmt::Debug for #name {
+        impl #impl_generics ::std::fmt::Debug for #name #ty_generics #where_clause {
             fn fmt(&self, fmt: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
                 fmt.debug_struct(stringify!(#name))
                    #(#fields)*
@@ -60,5 +63,24 @@ fn parse_attr(attr: &Attribute) -> Result<String, syn::Error> {
     match (ident.to_string().as_str(), lit) {
         ("debug", Lit::Str(s)) => Ok(s.value()),
         _ => err,
+    }
+}
+
+fn generate_where_clause(generics: &syn::Generics) -> TokenStream2 {
+    let clauses: Vec<_> = generics
+        .type_params()
+        .map(|syn::TypeParam { ident, bounds, .. }| {
+            if bounds.is_empty() {
+                quote!(#ident: ::std::fmt::Debug)
+            } else {
+                quote!(#ident: #bounds + ::std::fmt::Debug)
+            }
+        })
+        .collect();
+
+    if clauses.is_empty() {
+        quote!()
+    } else {
+        quote!(where #(#clauses),*)
     }
 }
